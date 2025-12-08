@@ -1,0 +1,131 @@
+代码基于mysql数据库
+-- 1. 删除现有存储过程，
+DROP PROCEDURE IF EXISTS generate_sn_file_by_requestid;
+
+-- 2. 创建存储过程，生成日志文件
+DELIMITER $$
+CREATE PROCEDURE generate_sn_file_by_requestid(
+    IN p_requestid VARCHAR(50)
+)
+BEGIN
+    DECLARE v_xmh VARCHAR(100);
+    DECLARE v_file_name VARCHAR(255);
+    DECLARE v_file_path VARCHAR(500);
+    DECLARE v_current_time VARCHAR(20);
+    DECLARE v_record_count INT DEFAULT 0;
+    
+    SET v_current_time = DATE_FORMAT(NOW(), '%Y%m%d%H%i%s');
+    
+    -- 合并查询，一次性获取项目号和记录数，更高效严谨
+    SELECT 
+        COALESCE(MAX(dt1.xmh), 'UNKNOWN'), 
+        COUNT(*)
+    INTO 
+        v_xmh, 
+        v_record_count
+    FROM formtable_main_62_dt1 dt1
+    LEFT JOIN formtable_main_62 main ON main.id = dt1.mainid
+    WHERE main.requestid = p_requestid 
+      AND dt1.snqsw IS NOT NULL;
+    
+    IF v_record_count = 0 THEN
+        -- 【优化点】直接返回，避免触发任何表操作
+        SELECT 
+            'ERROR' AS `status`,
+            CONCAT('未找到requestid为 ', p_requestid, ' 的有效数据') AS `message`,
+            NULL AS file_name,
+            NULL AS file_path,
+            0 AS `record_count`;
+    ELSE
+        SET v_file_name = CONCAT(v_xmh, '_SN_', v_current_time, '.txt');
+        SET v_file_path = CONCAT('/home/codesn/', v_file_name);
+        
+        -- 【新的导出查询 - 带标签的文本格式】
+        
+SET @export_query = CONCAT(
+        'SELECT CONCAT( ',
+	'''OA Process No: \"'', lcbh, ''\"'', CHAR(10), ',
+        '''Project: \"'', xmh, ''\"'', CHAR(10), ',
+        '''lot: \"'', tc_sfd06, ''\"'', CHAR(10), ',
+        '''StartSN: '', snqsw, CHAR(10), ',
+        '''StopSN: '', snjsw, CHAR(10), ',
+        '''SNGenTime: \"'', DATE_FORMAT(NOW(), ''%Y-%m-%d %H:%i:%s''), ''\"'', CHAR(10), ',
+        -- 新增字段开始 --
+        '''Chip No: \"'', ph, ''\"'', CHAR(10), ',
+        '''Wafer Version: \"'',
+            CASE waferbb
+                WHEN 1 THEN ''A''
+                WHEN 2 THEN ''B''
+                WHEN 3 THEN ''C''
+                WHEN 4 THEN ''D''
+                WHEN 5 THEN ''E''
+                WHEN 6 THEN ''F''
+                ELSE ''Unknown'' -- 容错处理，处理非预期值
+            END,
+        ''\"'', CHAR(10), ',
+        '''Product grade: \"'',
+            CASE cpdj
+                WHEN 0 THEN ''车规''
+                WHEN 1 THEN ''工规''
+                ELSE ''Unknown''
+            END,
+        ''\"'', CHAR(10), ',
+        '''Coating/MLS: \"'',
+            CASE coatingmls
+                WHEN 0 THEN ''None''
+                WHEN 1 THEN ''MicroLens''
+                ELSE ''Unknown''
+            END,
+        ''\"'', CHAR(10), ',
+        -- 新增字段结束 --
+        'CHAR(10) ', -- 保持原有逻辑：每条记录后再加一个换行以生成空行
+    ') AS formatted_data ',
+    'FROM formtable_main_62_dt1 dt1 ',
+    'LEFT JOIN formtable_main_62 main ON main.id = dt1.mainid ',
+    'WHERE snqsw IS NOT NULL ',
+    '  AND main.requestid = ''', p_requestid, ''' ',
+    'ORDER BY dt1.id ',
+    'INTO OUTFILE ''', v_file_path, ''' ',
+    'LINES TERMINATED BY '''' ' -- 设置为空字符串，将换行控制权完全交给CONCAT函数
+);
+        
+        PREPARE stmt FROM @export_query;
+        EXECUTE stmt;
+        DEALLOCATE PREPARE stmt;
+        
+        -- 确保日志表存在后插入
+        INSERT INTO file_generate_log 
+        (requestid, xmh, file_name, file_path, record_count, STATUS)
+        VALUES 
+        (p_requestid, v_xmh, v_file_name, v_file_path, v_record_count, 'SUCCESS');
+        
+        -- 最终返回
+        SELECT 
+            'SUCCESS' AS `status`,
+            CONCAT('文件已生成: ', v_file_path) AS `message`,
+            v_file_name AS file_name,
+            v_file_path AS file_path,
+            v_record_count AS `record_count`;
+    END IF;
+END$$
+DELIMITER ;
+-- 创建储存过程完毕
+-- 3.日志表创建
+        CREATE TABLE IF NOT EXISTS file_generate_log (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            requestid VARCHAR(50) NOT NULL,
+            xmh VARCHAR(100),
+            file_name VARCHAR(255) NOT NULL,
+            file_path VARCHAR(500) NOT NULL,
+            generate_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+            record_count INT DEFAULT 0,
+            STATUS VARCHAR(20) DEFAULT 'SUCCESS',
+            error_message TEXT,
+            INDEX idx_requestid (requestid),
+            INDEX idx_generate_time (generate_time)
+        );
+--调用存储过程    
+  CALL generate_sn_file_by_requestid('$requestid$');  
+  
+
+

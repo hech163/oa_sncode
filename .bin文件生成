@@ -1,0 +1,635 @@
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+<script>
+  jQuery(document).ready(function($) {
+         WfForm.triggerFieldAllLinkage("field8486");
+    //获取当前操作人员
+   var czy=WfForm.getGlobalStore().commonParam.currentUserid
+//获取当前节点名称
+   var jdname=  WfForm.getGlobalStore().commonParam.nodename
+     console.log("czy的值："+czy);
+     console.log("jdname的值："+jdname);
+    //获取申请人信息
+    var sqr=WfForm.getFieldValue("field7608");
+   // if(czy==sqr && jdname=="发起人确认"){
+    // 创建按钮
+    var buttonHtml = '<button id="performanceBtn" title="下载SN码BIN文件" size="small" class="ant-btn ant-btn-primary" style="height:25px;display:flex;align-items:center;margin-left:3px;">下载SN码BIN文件</button>';
+    var button = $(buttonHtml);
+    
+    // 将按钮插入到指定的单元格中，btnid 为 表单单元格 自定义属性 中 常用属性 id 的值（以"btnid"为例）
+    $('#btnid').append(button);
+    
+    // 绑定点击事件
+    button.on('click', function() {
+          WfForm.triggerFieldAllLinkage("field7613");  
+         WfForm.triggerFieldAllLinkage("field18895"); 
+        //触发一次明细料号字段段联动
+         var rowArr1 = WfForm.getDetailAllRowIndexStr("detail_1").split(",");
+          for(var i = 0; i < rowArr1.length; i++) {
+            var rowIndex = rowArr1[i];
+            if(rowIndex !== "") {
+             WfForm.triggerFieldAllLinkage("field7602_"+rowIndex);  
+             //触发项目号字段联动
+                        setTimeout(function() {
+          WfForm.triggerFieldAllLinkage("field18854_"+rowIndex);  
+    }, 2000);
+            }
+        }
+       // 1. 触发项目号字段联动
+        triggerProjectLinkage();
+         
+       
+       // 2. 等待1秒让联动完成，然后计算明细行并生成ZIP
+      setTimeout(function() {
+          // 3. 计算明细行
+          calculateDetailRows();//触发一次SN计算
+         //4.生成ZIP文件并触发下载
+         generateAllBinFiles();
+         
+         //计算组合代码打印EXCEL
+         addRow3();
+         //打印SN最大值
+         updateDetail4FromDetail1();
+    }, 2000);
+    
+           setTimeout(function() {
+          //触发保存
+           WfForm.doRightBtnEvent("BTN_WFSAVE"); 
+    }, 2000);
+    });
+      
+   // }
+  });
+</script>
+<script>
+// 生成所有BIN文件并打包为ZIP
+async function generateAllBinFiles() {
+    try {
+        // 获取明细表的所有行号
+        var rowArr = WfForm.getDetailAllRowIndexStr("detail_1").split(",");
+        var detailRecords = [];
+        var originalDate = WfForm.getFieldValue("field7609") || "";// 申请日期
+        var byte0_3 = formatDateToYYYYMMDD(originalDate);
+        // 遍历每一行明细
+        for(var i = 0; i < rowArr.length; i++) {
+            var rowIndex = rowArr[i];
+            if(rowIndex !== "") {
+                // 获取该行所有字段的值
+                var record = {
+                    cpxh: WfForm.getFieldValue("field18854_" + rowIndex) || "", // 对外型号/项目号
+                    byte11: WfForm.getFieldValue("field18857_" + rowIndex) || "0", //Wafer版本号
+                    byte12: WfForm.getFieldValue("field18859_" + rowIndex) || "0", // Coating/MLS
+                    byte13: WfForm.getFieldValue("field18858_" + rowIndex) || "0", // HEI/WB（产品等级）
+                    pici: WfForm.getFieldValue("field18871_" + rowIndex) || "", // 批次号
+                    SN: WfForm.getFieldValue("field18855_" + rowIndex) || "0",  //SN起始码
+                    byte0_3: byte0_3 // 添加申请日期到记录中
+                   
+                };
+                
+                // 只添加有产品代码和批次号的记录
+                if (record.cpxh && record.pici) {
+                    detailRecords.push(record);
+                }
+                if(record.cpxh.length===0 || record.pici.length===0){
+                   alert(record.cpxh);
+                    console.log("record.cpxh的值"+record.cpxh);
+                   return;
+                }
+            }
+        }
+        
+        if (detailRecords.length === 0) {
+            alert('请至少填写一条包含产品代码和批次号的明细记录');
+            return;
+        }
+        
+          console.log("record.cpxh的值"+record.cpxh);
+        // 按产品代码分组
+        var groupedRecords = {};
+        for (var i = 0; i < detailRecords.length; i++) {
+            var record = detailRecords[i];
+             // 确保使用原始项目号，不进行任何处理
+             var productCode = String(record.cpxh).trim(); // 转换为字符串并去除空格
+            if (!groupedRecords[productCode]) {
+                groupedRecords[productCode] = [];
+            }
+            
+            groupedRecords[productCode].push(record);
+        }
+        
+        // 为每个产品代码生成ZIP文件
+        for (var productCode in groupedRecords) {
+            if (groupedRecords.hasOwnProperty(productCode)) {
+                var records = groupedRecords[productCode];
+                await generateZipForProduct(productCode, records);
+            }
+        }
+        
+        //alert('所有ZIP文件生成完成！请进行SN最大值文件，单据打印');
+    } catch (error) {
+        console.error('生成ZIP文件失败:', error);
+        //alert('文件生成失败: ' + error.message);
+    }
+}
+// 为特定产品代码生成ZIP文件
+async function generateZipForProduct(productCode, records) {
+    var zip = new JSZip();
+    var firstFolder = productCode + 'CODE';
+    var productFolder = zip.folder(firstFolder);
+     console.log("record.firstFolder的值"+firstFolder);
+    // 为每个记录生成BIN文件
+    for (var i = 0; i < records.length; i++) {
+        var record = records[i];
+        var binContent = generateSingleBinFile(record);
+        var serialFolder = productFolder.folder(record.pici);
+        var fileName = record.cpxh + '_SN.bin';
+        serialFolder.file(fileName, binContent);
+    }
+    
+    // 生成ZIP文件并触发下载
+    var content = await zip.generateAsync({type: "blob"});
+    var downloadUrl = URL.createObjectURL(content);
+    
+    var a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = firstFolder + '.zip';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    
+    URL.revokeObjectURL(downloadUrl);
+}
+// 根据明细记录生成单个BIN文件内容
+function generateSingleBinFile(record) {
+    // 创建256字节的ArrayBuffer，初始填充0xFF
+    const buffer = new ArrayBuffer(256);
+    const view = new DataView(buffer);
+    for (let i = 0; i < 256; i++) {
+        view.setUint8(i, 0xFF);
+    }
+    // 0-3字节: 日期处理 (byte0_3)
+     console.log("record.byte0_3的值"+record.byte0_3);
+      console.log("record.byte0_3.length的值"+record.byte0_3.length);
+    if (record.byte0_3 && record.byte0_3.length === 8) {
+        view.setUint8(0, parseInt(record.byte0_3.substring(0, 2), 16)); // 年的后两位
+        view.setUint8(1, parseInt(record.byte0_3.substring(2, 4), 16)); // 年的前两位
+        view.setUint8(2, parseInt(record.byte0_3.substring(4, 6), 16)); // 月
+        view.setUint8(3, parseInt(record.byte0_3.substring(6, 8), 16)); // 日
+    }
+    // 4-6字节: 产品代码处理 (cpxh)
+    const numbers = record.cpxh ? record.cpxh.replace(/\D/g, '') : '';
+    if (numbers.length >= 4) {
+        view.setUint8(4, parseInt(numbers.substring(0, 2), 16));
+        view.setUint8(5, parseInt(numbers.substring(2, 4), 16));
+    }
+    view.setUint8(6, 0xFF);
+    // 7-10字节: 固定00 00 00 00
+    for (let i = 7; i <= 10; i++) {
+        view.setUint8(i, 0x00);
+    }
+    // 11-13字节: byte11, byte12, byte13
+    view.setUint8(11, parseInt(record.byte11, 16) || 0);
+    view.setUint8(12, parseInt(record.byte12, 16) || 0);
+    view.setUint8(13, parseInt(record.byte13, 16) || 0);
+    // 14-15字节: 固定55 55
+    view.setUint8(14, 0x55);
+    view.setUint8(15, 0x55);
+    // 16字节: pici长度
+    view.setUint8(16, record.pici ? record.pici.length : 0);
+    // 17字节: 固定01
+    view.setUint8(17, 0x01);
+    // 18-19字节: 固定AA AA
+    view.setUint8(18, 0xAA);
+    view.setUint8(19, 0xAA);
+    // 20-31字节: pici转换
+    const txt7Bytes = castToRaw(record.pici || "");
+    for (let i = 0; i < 12; i++) {
+        view.setUint8(20 + i, txt7Bytes[i]);
+    }
+    // 32-35字节: SN码计算
+    const txt8Bytes = numberToHexBytesDataView(parseInt(record.SN) || 0);
+    for (let i = 0; i < 4; i++) {
+        view.setUint8(32 + i, txt8Bytes[i]);
+    }
+    // 36-249字节: 已初始化为0xFF
+    // 250字节: 0xF0 + year % 10 (基于byte0_3)
+    if (record.byte0_3 && record.byte0_3.length >= 4) {
+        const year = parseInt(record.byte0_3.substring(0, 4)); // 提取年份
+        const yearLastDigit = year % 10; // 年份的最后一位
+        view.setUint8(250, 0xF0 + yearLastDigit);
+    } else {
+        view.setUint8(250, 0xF0); // 默认值
+    }
+  // 251字节: 周数计算 (基于byte0_3)
+    // 计算周数并减1
+    const weekNum = getWeekNumber(record.byte0_3 || "");
+    const weekValue = weekNum - 1;
+    
+    // 将周数值转换为十六进制字符串
+    const weekHex = weekValue.toString(16).toUpperCase().padStart(2, '0');
+    
+    // 将这个十六进制字符串解析为数值存储
+    // 例如：weekValue = 42, weekHex = "2A", 但这不是我们想要的
+    // 我们想要存储的是十六进制值0x42（即十进制66）
+    
+    // 所以我们需要将周数值作为十六进制数字的字符串表示来处理
+    // 例如：周数42 -> 字符串"42" -> 解析为十六进制数0x42（十进制66）
+    const weekHexDisplay = weekValue.toString().padStart(2, '0'); // 确保是两位数字符串
+    const byteValue = parseInt(weekHexDisplay, 16); // 将"42"解析为十六进制数
+    
+    view.setUint8(251, byteValue);
+    // 252-255字节: 前0-251字节的CRC32值
+    // 提取前252字节数据
+    const dataForCRC = new Uint8Array(buffer, 0, 252);
+    const crcValue = crc32b(dataForCRC);
+    
+    // 以大端序写入CRC32值
+    view.setUint32(252, crcValue, false);
+    return buffer;
+}
+// 计算周数函数
+function getWeekNumber(dateStr) {
+    if (!dateStr || dateStr.length !== 8) return 43; // 默认43周
+    
+    const year = parseInt(dateStr.substring(0, 4));
+    const month = parseInt(dateStr.substring(4, 6)) - 1;
+    const day = parseInt(dateStr.substring(6, 8));
+    
+    const date = new Date(year, month, day);
+    const firstDayOfYear = new Date(date.getFullYear(), 0, 1);
+    const pastDaysOfYear = (date - firstDayOfYear) / 86400000;
+    
+    return Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
+}
+// 字符串转原始字节数组
+function castToRaw(str) {
+    if (!str) return new Array(12).fill(0xFF);
+    
+    const result = [];
+    for (let i = 0; i < Math.min(str.length, 12); i++) {
+        result.push(str.charCodeAt(i));
+    }
+    
+    // 填充剩余字节
+    while (result.length < 12) {
+        result.push(0xFF);
+    }
+    
+    return result;
+}
+// 数字转十六进制字节
+function numberToHexBytesDataView(num) {
+    const value = num || 0;
+    const buffer = new ArrayBuffer(4);
+    const view = new DataView(buffer);
+    view.setUint32(0, value, false); // 大端序
+    return new Uint8Array(buffer);
+}
+// CRC32计算函数
+function crc32b(data) {
+  let crc = 0xFFFFFFFF;
+  const table = [];
+  
+  // 预计算CRC表
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let j = 0; j < 8; j++) {
+      if (c & 1) {
+        c = 0xEDB88320 ^ (c >>> 1);
+      } else {
+        c = c >>> 1;
+      }
+    }
+    table[i] = c;
+  }
+  
+  // 计算CRC
+  for (let i = 0; i < data.length; i++) {
+    crc = table[(crc ^ data[i]) & 0xFF] ^ (crc >>> 8);
+  }
+  
+  return crc ^ 0xFFFFFFFF;
+}
+function calculateDetailRows() {
+    // 获取明细表所有行索引
+    var rowArr = WfForm.getDetailAllRowIndexStr("detail_1").split(",");
+    
+    // 用于存储每个txt2对应的基数信息和当前计数
+    var baseDataMap = {};
+    
+    // 第一次遍历：收集每个txt2的基数信息
+    for(var i = 0; i < rowArr.length; i++) {
+        var rowIndex = rowArr[i];
+        if(rowIndex !== "") {
+            
+            var cpxhValue = WfForm.getFieldValue("field18854_" + rowIndex); //获取当前行产品型号
+            var baseValue = WfForm.getFieldValue("field18869_" + rowIndex);//获取SN基数
+            
+            if(cpxhValue && baseValue) {
+                // 如果该txt2值还没有记录，初始化
+                if(!baseDataMap[cpxhValue]) {
+                    baseDataMap[cpxhValue] = {
+                        base: parseFloat(baseValue), // 基数
+                        currentStart: null,          // 当前起始位
+                        rows: []                     // 该分组的所有行索引
+                    };
+                }
+                // 将该行添加到对应分组中
+                baseDataMap[cpxhValue].rows.push(rowIndex);
+            }
+        }
+    }
+    
+    // 第二次遍历：计算每个分组的起始位和结束位
+    for(var cpxhValue in baseDataMap) {
+        if(baseDataMap.hasOwnProperty(cpxhValue)) {
+            var groupData = baseDataMap[cpxhValue];
+            var base = groupData.base;
+            var rows = groupData.rows;
+            
+            // 按行索引排序，确保按顺序计算
+            rows.sort(function(a, b) {
+                return parseInt(a) - parseInt(b);
+            });
+            
+            // 遍历该分组的所有行
+            for(var j = 0; j < rows.length; j++) {
+                var rowIndex = rows[j];
+                var currentStart = WfForm.getFieldValue("field18855_" + rowIndex);
+                
+                // 如果是该分组的第一行且起始位已填写
+                if(j === 0 && currentStart) {
+                    var startNum = parseFloat(currentStart);
+                    var endNum = startNum + base - 1;
+                    
+                    // 更新结束位
+                    WfForm.changeFieldValue("field18856_" + rowIndex, {value: endNum.toString()});
+                    
+                    // 记录下一行的起始位
+                    groupData.currentStart = endNum + 1;
+                }
+                // 如果是后续行
+                else if(j > 0 && groupData.currentStart !== null) {
+                    var startNum = groupData.currentStart;
+                    var endNum = startNum + base - 1;
+                    
+                    // 更新起始位和结束位
+                    WfForm.changeFieldValue("field18855_" + rowIndex, {value: startNum.toString()});
+                    WfForm.changeFieldValue("field18856_" + rowIndex, {value: endNum.toString()});
+                    
+                    // 更新下一行的起始位
+                    groupData.currentStart = endNum + 1;
+                }
+            }
+        }
+    }
+}
+function formatDateToYYYYMMDD(dateStr) {
+    if (!dateStr) return "";
+    
+    // 移除所有非数字字符，只保留数字
+    const numbers = dateStr.replace(/\D/g, '');
+    
+    // 如果已经是8位数字，直接返回
+    if (numbers.length === 8) {
+        return numbers;
+    }
+    
+    // 尝试解析标准日期格式
+    const date = new Date(dateStr);
+    if (!isNaN(date.getTime())) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}${month}${day}`;
+    }
+    
+    // 如果无法解析，返回空字符串
+    return "";
+}
+// 触发项目号字段联动的函数
+function triggerProjectLinkage() {
+    try {
+        // 获取明细表的所有行号
+        var rowArr = WfForm.getDetailAllRowIndexStr("detail_1").split(",");
+        
+        // 用于存储每个项目号对应的最小行号
+        var projectMinRowMap = {};
+        
+        // 第一次遍历：找出每个项目号的最小行号
+        for(var i = 0; i < rowArr.length; i++) {
+            var rowIndex = rowArr[i];
+            if(rowIndex !== "") {
+                var projectValue = WfForm.getFieldValue("field18854_" + rowIndex);
+                
+                if(projectValue) {
+                    // 如果该项目号还没有记录，或者当前行号更小，则更新最小行号
+                    if(!projectMinRowMap[projectValue] || parseInt(rowIndex) < parseInt(projectMinRowMap[projectValue])) {
+                        projectMinRowMap[projectValue] = rowIndex;
+                    }
+                }
+            }
+        }
+        
+        // 第二次遍历：只为每个项目号的最小行号触发联动
+        var triggeredCount = 0;
+        for(var projectValue in projectMinRowMap) {
+            if(projectMinRowMap.hasOwnProperty(projectValue)) {
+                var minRowIndex = projectMinRowMap[projectValue];
+                
+                console.log("触发项目号联动 - 项目号:", projectValue, "行号:", minRowIndex);
+                
+                // 触发该行的字段联动
+                WfForm.triggerFieldAllLinkage("field110_" + minRowIndex);
+                
+                triggeredCount++;
+            }
+        }
+        
+        console.log("总共触发了", triggeredCount, "个不同项目号的联动");
+        return triggeredCount;
+    } catch (error) {
+        console.error("触发项目号联动失败:", error);
+        return 0;
+    }
+}
+function addRow3(){
+ // 获取料号批次表所有行
+var detail1Rows = WfForm.getDetailAllRowIndexStr("detail_1").split(",");
+// 获取测试程序表所有行
+var detail2Rows = WfForm.getDetailAllRowIndexStr("detail_2").split(",");
+// 存储料号批次表数据
+var materialBatchData = [];
+// 存储测试程序表数据，按料号分组
+var testProgramDataByMaterial = {};
+var testProgramSet = {}; // 用于按料号去重
+// 获取主表单字段值
+var pbiNo = WfForm.getFieldValue("field13295"); // PBI NO
+var orderDate = WfForm.getFieldValue("field7609"); // 下单日期
+var client = WfForm.getFieldValue("field7613"); // 委托方    
+var clientDisplay = WfForm.getFieldValue("field18900");// 委托方显示值
+var processor = WfForm.getFieldValue("field8486"); // 加工方
+// 1. 读取料号批次表数据
+for(var i = 0; i < detail1Rows.length; i++){
+    var rowIndex = detail1Rows[i];
+    if(rowIndex !== ""){
+        var lh = WfForm.getFieldValue("field7602_"+rowIndex);        // 料号
+        var tc_sfd06 = WfForm.getFieldValue("field18871_"+rowIndex); // 批次
+        var ph = WfForm.getFieldValue("field18898_"+rowIndex);        // 片号
+        var cgsl = WfForm.getFieldValue("field14805_"+rowIndex);    // 采购数量
+        
+        if(lh && tc_sfd06 && ph && cgsl) {
+            materialBatchData.push({
+                lh: lh,
+                tc_sfd06: tc_sfd06,
+                ph: ph,
+                cgsl: cgsl
+            });
+        }
+    }
+}
+// 2. 读取测试程序表数据并按料号分组去重
+for(var j = 0; j < detail2Rows.length; j++){
+    var rowIndex2 = detail2Rows[j];
+    if(rowIndex2 !== ""){
+        var lh_test = WfForm.getFieldValue("field18899_"+rowIndex2);   // 测试程序表的料号字段
+        var cslb = WfForm.getFieldValue("field18897_"+rowIndex2);   // 测试类别
+        var cscx = WfForm.getFieldValue("field18884_"+rowIndex2);   // 测试程序
+        var wd = WfForm.getFieldValue("field18885_"+rowIndex2);       // 温度
+        var wdDisplay ="";
+        if(wd==1){
+            wdDisplay="常温";
+        }
+       else if(wd==2){
+            wdDisplay="低温";
+        }
+       else if(wd==3){
+            wdDisplay="高温";
+        }
+        else{
+          wdDisplay=0;
+        }
+        
+        if(lh_test && cslb && cscx && wd) {
+            // 初始化该料号的分组和去重集合
+            if(!testProgramDataByMaterial[lh_test]) {
+                testProgramDataByMaterial[lh_test] = [];
+                testProgramSet[lh_test] = new Set();
+            }
+            
+            // 创建唯一标识符用于去重
+            var uniqueKey = cslb + ":" + cscx + ":" + wd;
+            
+            // 如果该料号下还没有这个测试程序组合，则添加
+            if(!testProgramSet[lh_test].has(uniqueKey)) {
+                testProgramSet[lh_test].add(uniqueKey);
+                testProgramDataByMaterial[lh_test].push({
+                    cslb: cslb,
+                    cscx: cscx,
+                    wd: wd,
+                    wdDisplay: wdDisplay,
+                    uniqueKey: uniqueKey
+                });
+            }
+        }
+    }
+}
+// 3. 清空组合表
+WfForm.delDetailRow("detail_3", "all");
+// 4. 进行组合并写入组合表（增加料号匹配限制）
+var totalCombinations = 0;
+var combinedDataForExport = []; // 存储组合后的数据用于导出Excel
+if(materialBatchData.length > 0) {
+    for(var m = 0; m < materialBatchData.length; m++) {
+        var material = materialBatchData[m];
+        var materialCode = material.lh; // 料号批次表的料号
+        
+        // 获取该料号对应的测试程序数据
+        var testProgramsForMaterial = testProgramDataByMaterial[materialCode];
+        
+        if(testProgramsForMaterial && testProgramsForMaterial.length > 0) {
+            for(var t = 0; t < testProgramsForMaterial.length; t++) {
+                var testProgram = testProgramsForMaterial[t];
+                
+                // 添加新行到组合表
+                var newRowIndex = WfForm.addDetailRow("detail_3", {
+                    field18887: {value: material.lh},           // 料件编号 = 料号
+                    field18888: {value: material.tc_sfd06},       // 批次
+                    field18889: {value: material.cgsl},           // 数量 = 采购数量
+                    field18890: {value: material.ph},             // 片号
+                    field18891: {value: testProgram.cslb + ":" + testProgram.cscx}, // 测试程序 = 测试类别:测试程序
+                    field18892: {value: testProgram.wd}           // 温度
+                });
+                
+                // 保存组合数据用于导出
+                combinedDataForExport.push({
+                    产品型号: material.lh,
+                    产品批次: material.tc_sfd06,
+                    数量: material.cgsl,
+                    片号: material.ph,
+                    测试程序: testProgram.cslb + ":" + testProgram.cscx,
+                    备注: testProgram.wdDisplay // 使用显示值
+                });
+                
+                totalCombinations++;
+                console.log("已添加组合数据: " + material.lh + ", " + material.tc_sfd06 + ", " + 
+                           material.cgsl + ", " + material.ph + ", " + 
+                           testProgram.cslb + ":" + testProgram.cscx + ", " + testProgram.wd);
+            }
+        } else {
+            console.log("料号 " + materialCode + " 在测试程序表中没有对应的测试程序数据");
+        }
+    }
+    
+    console.log("组合完成！共生成 " + totalCombinations + " 行数据");
+} else {
+    console.log("料号批次表无数据，无法进行组合");
+}
+} 
+// 从明细表1获取数据并写入明细表4
+function updateDetail4FromDetail1() {
+    // 获取明细表1所有行索引
+    var detail1Rows4 = WfForm.getDetailAllRowIndexStr("detail_1").split(",");
+    // 用于存储每个项目号的最大SN结束号
+    var projectMaxSN = {};
+    
+    // 遍历明细表1，找出每个项目号的最大SN结束号
+    for(var i = 0; i < detail1Rows4.length; i++) {
+        var rowIndex = detail1Rows4[i];
+        if(rowIndex !== "") {
+            // 获取当前行的项目号和SN结束号
+            var projectNo = WfForm.getFieldValue("field18854_" + rowIndex); // 项目号
+            var snEnd = WfForm.getFieldValue("field18856_" + rowIndex); // SN结束号
+            
+            if(projectNo && snEnd) {
+                var snEndNum = parseFloat(snEnd);
+                
+                // 如果该项目号还没有记录，或者当前SN结束号更大，则更新
+                if(!projectMaxSN[projectNo] || snEndNum > projectMaxSN[projectNo]) {
+                    projectMaxSN[projectNo] = snEndNum;
+                }
+            }
+        }
+    }
+    
+    // 清空明细表4
+    WfForm.delDetailRow("detail_4", "all");
+    // 遍历projectMaxSN，为每个项目号在明细表4中创建新行
+    var projectKeys = Object.keys(projectMaxSN);
+    for(var j = 0; j < projectKeys.length; j++) {
+        var projectNo = projectKeys[j];
+        var maxSN = projectMaxSN[projectNo];
+        console.log("projectNo: " + projectKeys[j]);
+        console.log("maxSN: " + projectMaxSN[projectNo]);
+        // 计算当前最大值 = 最大SN结束号 + 1
+        var currentMax = (maxSN + 1).toString();
+        
+        // 在明细表4中添加新行并设置初始值
+        WfForm.addDetailRow("detail_4", {
+            field18930: {value: projectNo},    // 项目号
+            field18942: {value: currentMax}    // 当前最大值
+        });
+    }
+}
+</script>

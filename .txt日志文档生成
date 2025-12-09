@@ -13,7 +13,8 @@ BEGIN
     DECLARE v_file_path VARCHAR(500);
     DECLARE v_current_time VARCHAR(20);
     DECLARE v_record_count INT DEFAULT 0;
-    
+    DECLARE v_dqsndmbb VARCHAR(100); -- 新增：声明版本变量
+
     SET v_current_time = DATE_FORMAT(NOW(), '%Y%m%d%H%i%s');
     
     -- 合并查询，一次性获取项目号和记录数，更高效严谨

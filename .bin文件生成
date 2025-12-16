@@ -32,7 +32,7 @@
              WfForm.triggerFieldAllLinkage("field7602_"+rowIndex);  
              //触发项目号字段联动
                         setTimeout(function() {
-          WfForm.triggerFieldAllLinkage("field18854_"+rowIndex);  
+          //WfForm.triggerFieldAllLinkage("field18854_"+rowIndex);  
     }, 2000);
             }
         }

@@ -195,15 +195,15 @@ function generateSingleBinFile(record) {
     view.setUint8(12, parseInt(record.byte12, 16) || 0);
     view.setUint8(13, parseInt(record.byte13, 16) || 0);
 
-  //增加7905，7901判断
-    if(record.cpxh==='AT7905'){
+  //增加7905，7901，7908判断
+    if(record.cpxh==='AT7905' || record.cpxh==='AT7905'){
         view.setUint8(13, parseInt(record.byte13_7905, 16) || 0);
     }else{
         view.setUint8(13, parseInt(record.byte13, 16) || 0);
     }
     // 14-15字节: 固定55 55
-    //增加7905，7901判断
-    if(record.cpxh==='AT7905'){
+    //增加7905，7901，,7908判断
+    if(record.cpxh==='AT7905' || record.cpxh==='AT7908'){
         view.setUint8(14, parseInt(record.byte14, 16) || 0);
     }else{
        view.setUint8(14, 0x55);

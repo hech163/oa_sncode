@@ -65,6 +65,11 @@
 <script>
 // 生成所有BIN文件并打包为ZIP
 async function generateAllBinFiles() {
+  // C20261014 BY HECHH 新增 - 统一清理字段首尾空格（含全角空格 \u3000），去空格后为空才用默认值
+  function trimField(v, d) {
+  var s = String(v == null ? "" : v).trim();
+  return s === "" ? d : s;
+}
     try {
         // 获取明细表的所有行号
         var rowArr = WfForm.getDetailAllRowIndexStr("detail_1").split(",");
@@ -77,14 +82,22 @@ async function generateAllBinFiles() {
             if(rowIndex !== "") {
                 // 获取该行所有字段的值
                 var record = {
-                    cpxh: WfForm.getFieldValue("field18854_" + rowIndex) || "", // 对外型号/项目号
-                    byte11: WfForm.getFieldValue("field18857_" + rowIndex) || "0", //Wafer版本号
-                    byte12: WfForm.getFieldValue("field18859_" + rowIndex) || "0", // Coating/MLS
-                    byte13: WfForm.getFieldValue("field18858_" + rowIndex) || "0", // HEI/WB（产品等级）
-                    byte13_7905:WfForm.getFieldValue("field19789_" + rowIndex) || "0", // （产品等级  7905）//20260604 add
-                    byte14: WfForm.getFieldValue("field19790_" + rowIndex) || "0", // 7905 FAB Tools
-                    pici: WfForm.getFieldValue("field18871_" + rowIndex) || "", // 批次号
-                    SN: WfForm.getFieldValue("field18855_" + rowIndex) || "0",  //SN起始码
+                    // cpxh: WfForm.getFieldValue("field18854_" + rowIndex) || "", // 对外型号/项目号
+                    cpxh: trimField(WfForm.getFieldValue("field18854_" + rowIndex), ""), // 对外型号/项目号（C20261014 BY HECHH 源头去首尾空格）
+                    // byte11: WfForm.getFieldValue("field18857_" + rowIndex) || "0", //Wafer版本号
+                    byte11: trimField(WfForm.getFieldValue("field18857_" + rowIndex), "0"), //Wafer版本号（C20261014 BY HECHH）
+                    // byte12: WfForm.getFieldValue("field18859_" + rowIndex) || "0", // Coating/MLS
+                    byte12: trimField(WfForm.getFieldValue("field18859_" + rowIndex), "0"), // Coating/MLS（C20261014 BY HECHH）
+                    // byte13: WfForm.getFieldValue("field18858_" + rowIndex) || "0", // HEI/WB（产品等级）
+                    byte13: trimField(WfForm.getFieldValue("field18858_" + rowIndex), "0"), // HEI/WB（产品等级）（C20261014 BY HECHH）
+                    // byte13_7905:WfForm.getFieldValue("field19789_" + rowIndex) || "0", // （产品等级  7905）//20260604 add
+                    byte13_7905: trimField(WfForm.getFieldValue("field19789_" + rowIndex), "0"), // （产品等级  7905）（C20261014 BY HECHH）
+                    // byte14: WfForm.getFieldValue("field19790_" + rowIndex) || "0", // 7905 FAB Tools
+                    byte14: trimField(WfForm.getFieldValue("field19790_" + rowIndex), "0"), // 7905 FAB Tools（C20261014 BY HECHH）
+                    // pici: WfForm.getFieldValue("field18871_" + rowIndex) || "", // 批次号
+                    pici: trimField(WfForm.getFieldValue("field18871_" + rowIndex), ""), // 批次号（C20261014 BY HECHH 重点：去首尾空格，避免 0x20 落入 BIN）
+                    // SN: WfForm.getFieldValue("field18855_" + rowIndex) || "0",  //SN起始码
+                    SN: trimField(WfForm.getFieldValue("field18855_" + rowIndex), "0"),  //SN起始码（C20261014 BY HECHH）
                     byte0_3: byte0_3 // 添加申请日期到记录中
                    
                 };
